@@ -132,7 +132,7 @@ export default function NftMarketPlace() {
     } catch (err) {
       setTxLoading(false);
       console.error("Purchase failed", err);
-      toast.success("NFT Purchase Failed!", { id: loadingToast });
+      toast.success("NFT Purchase Failed!", { id: loadingToast, icon: "🚨" });
     }
   };
 

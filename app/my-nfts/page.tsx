@@ -111,7 +111,7 @@ export default function NftMarketPlace() {
       toast.success("NFT listed successfully!", { id: loadingToast });
     } catch (error) {
       setTxLoading(false);
-      toast.error("Failed to list NFT", { id: loadingToast });
+      toast.error("Failed to list NFT", { id: loadingToast, icon: "🚨" });
       console.log(error);
     }
   };

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Connection, PublicKey } from "@solana/web3.js";
+import { Connection } from "@solana/web3.js";
 import { Program, AnchorProvider, setProvider } from "@coral-xyz/anchor";
 import { useWallet } from "@solana/wallet-adapter-react";
 
@@ -11,43 +11,12 @@ import WalletConnection from "@/components/WalletConnect";
 import idl from "@/lib/idl/marketplace_task_contract.json";
 import { getAssociatedTokenAddress, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { MARKETPLACE_NAME, NETWORK } from "@/constants";
-import { LAMPORTS_PER_SOL } from "@solana/web3.js";
 
 import { getNFT } from "@/utils/nfts";
 import toast from "react-hot-toast";
+import NftCard from "@/components/NftCard";
+import { initializeMarketplace } from "@/utils/marketplace";
 
-const initializeMarketplace = async (
-  program: Program,
-  provider: AnchorProvider
-) => {
-  const marketplace = anchor.web3.PublicKey.findProgramAddressSync(
-    [Buffer.from("marketplace"), Buffer.from(MARKETPLACE_NAME)],
-    program.programId
-  )[0];
-  const rewardsMint = anchor.web3.Keypair.generate().publicKey; // Replace with actual mint if needed
-  const treasury = anchor.web3.Keypair.generate().publicKey; // Replace with actual treasury if needed
-
-  try {
-    const account = await program.account.marketplace.fetch(marketplace);
-    console.log("Marketplace already initialized:", account);
-  } catch (err) {
-    console.log("Marketplace not initialized. Initializing...");
-
-    await program.methods
-      .initialize(MARKETPLACE_NAME, 1) // name and fee percentage
-      .accounts({
-        admin: provider.wallet.publicKey,
-        marketplace,
-        rewardsMint,
-        treasury,
-        systemProgram: anchor.web3.SystemProgram.programId,
-        tokenProgram: TOKEN_PROGRAM_ID,
-      })
-      .rpc();
-
-    console.log("Marketplace initialized successfully!");
-  }
-};
 export default function NftMarketPlace() {
   const wallet = useWallet();
   const [program, setProgram] = useState<Program | null>(null);
@@ -82,7 +51,7 @@ export default function NftMarketPlace() {
           const metadata = await getNFT(listing.account.mint.toBase58());
           return {
             metadata,
-            price: listing.account.price.toString(), // or convert if it's a BN
+            price: listing.account.price.toString(),
             maker: listing.account.maker.toBase58(),
           };
         })
@@ -171,27 +140,13 @@ export default function NftMarketPlace() {
           </p>
         )}
         {listings.map((nft, idx) => (
-          <div key={idx} className="border p-4 rounded-lg shadow-md">
-            <img
-              src={nft.metadata.content.links?.image}
-              alt={nft.metadata.content.metadata.name}
-              className="w-full h-auto"
-            />
-            <h2 className="text-lg font-semibold mt-2">
-              {nft.metadata.content.metadata.name}
-            </h2>
-            <p>{nft.metadata.content.metadata.symbol}</p>
-            <p>Price: {Number(nft.price) / LAMPORTS_PER_SOL}</p>
-            <button
-              className="bg-blue-600 text-white px-4 py-2 mt-4 rounded"
-              onClick={() => purchaseNFT(nft)}
-              style={{
-                cursor: txLoading ? "not-allowed" : "pointer",
-              }}
-            >
-              Purchase
-            </button>
-          </div>
+          <NftCard
+            key={idx}
+            index={idx}
+            nft={nft}
+            onClick={purchaseNFT}
+            txLoading={txLoading}
+          />
         ))}
       </main>
     </WalletConnection>

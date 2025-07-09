@@ -59,8 +59,8 @@ export default function NftMarketPlace() {
       const nftMintAddress = new anchor.web3.PublicKey(nft.id);
 
       const makerAta = await getAssociatedTokenAddress(
-        nftMintAddress, // PublicKey of the NFT's mint
-        wallet.publicKey! // PublicKey of the wallet that owns it (the seller)
+        nftMintAddress,
+        wallet.publicKey!
       );
 
       const listing = anchor.web3.PublicKey.findProgramAddressSync(
@@ -81,7 +81,7 @@ export default function NftMarketPlace() {
       const umi = createUmi(connection);
 
       const nftMetadata = findMetadataPda(umi, {
-        mint: nftMintAddress, // This should be a `PublicKey`
+        mint: nftMintAddress,
       });
 
       const nftEdition = findMasterEditionPda(umi, {
@@ -101,7 +101,7 @@ export default function NftMarketPlace() {
         nftEdition,
         nftMetadata,
       });
-      await fetchNFTs(); // Refresh the NFT list after listing
+      await fetchNFTs();
       setTxLoading(false);
       toast.success("NFT listed successfully!", { id: loadingToast });
     } catch (error) {

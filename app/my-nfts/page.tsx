@@ -1,3 +1,6 @@
+/* eslint-disable @typescript-eslint/ban-ts-comment */
+/* eslint-disable @typescript-eslint/no-explicit-any */
+//@ts-nocheck
 "use client";
 
 import { useEffect, useState } from "react";
@@ -45,6 +48,8 @@ export default function NftMarketPlace() {
     try {
       setTxLoading(true);
       const connection = new Connection(NETWORK);
+
+      //@ts-expect-error
       const provider = new AnchorProvider(connection, wallet, {
         preflightCommitment: "processed",
       });

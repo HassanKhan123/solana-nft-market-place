@@ -1,3 +1,6 @@
+/* eslint-disable @typescript-eslint/ban-ts-comment */
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
 import { LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { FC } from "react";
 

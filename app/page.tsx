@@ -1,103 +1,177 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useEffect, useState } from "react";
+import { Connection } from "@solana/web3.js";
+import { Program, AnchorProvider, setProvider } from "@coral-xyz/anchor";
+import { useWallet } from "@solana/wallet-adapter-react";
+import axios from "axios";
+import * as anchor from "@coral-xyz/anchor";
+
+import WalletConnection from "@/app/components/WalletConnect";
+import idl from "@/lib/idl/marketplace_task_contract.json";
+import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
+
+const NETWORK = "https://api.devnet.solana.com";
+const HELIUS_API_KEY = process.env.NEXT_PUBLIC_HELIUS_API_KEY || "";
+
+const initializeMarketplace = async (
+  program: Program,
+  provider: AnchorProvider
+) => {
+  const name = "khan_marketplace";
+  const marketplace = anchor.web3.PublicKey.findProgramAddressSync(
+    [Buffer.from("marketplace"), Buffer.from(name)],
+    program.programId
+  )[0];
+  const rewardsMint = anchor.web3.Keypair.generate().publicKey; // Replace with actual mint if needed
+  const treasury = anchor.web3.Keypair.generate().publicKey; // Replace with actual treasury if needed
+
+  try {
+    const account = await program.account.marketplace.fetch(marketplace);
+    console.log("Marketplace already initialized:", account);
+  } catch (err) {
+    console.log("Marketplace not initialized. Initializing...");
+
+    await program.methods
+      .initialize(name, 1) // name and fee percentage
+      .accounts({
+        admin: provider.wallet.publicKey,
+        marketplace,
+        rewardsMint,
+        treasury,
+        systemProgram: anchor.web3.SystemProgram.programId,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .rpc();
+
+    console.log("Marketplace initialized successfully!");
+  }
+};
+export default function NftMarketPlace() {
+  const wallet = useWallet();
+  const [program, setProgram] = useState<Program | null>(null);
+  const [listings, setListings] = useState<any[]>([]);
+  const [nftMetadata, setNftMetadata] = useState<Record<string, any>>({});
+
+  useEffect(() => {
+    (async () => {
+      if (wallet.publicKey && wallet.signTransaction) {
+        const connection = new Connection(NETWORK);
+        const provider = new AnchorProvider(connection, wallet, {
+          preflightCommitment: "processed",
+        });
+        setProvider(provider);
+
+        const program = new Program(idl, provider);
+
+        setProgram(program);
+        await initializeMarketplace(program, provider);
+      }
+    })();
+  }, [wallet]);
+
+  const fetchMetadata = async (mintAddresses: string[]) => {
+    if (!mintAddresses.length) return [];
+    try {
+      const { data } = await axios.post(
+        `https://api.helius.xyz/v0/token-metadata?api-key=${HELIUS_API_KEY}`,
+        { mintAccounts: mintAddresses }
+      );
+      return data;
+    } catch (err) {
+      console.error("Failed to fetch metadata", err);
+      return [];
+    }
+  };
+
+  const loadListings = async () => {
+    if (!program) return;
+    try {
+      const allListings = await program.account.listing.all();
+      console.log("Loaded listings:", allListings.length);
+      setListings(allListings);
+
+      const mints = allListings.map((l: any) => l.account.mint.toBase58());
+      const metadata = await fetchMetadata(mints);
+
+      const metaByMint: Record<string, any> = {};
+      metadata.forEach((nft: any) => {
+        metaByMint[nft.mint] = nft;
+      });
+      setNftMetadata(metaByMint);
+    } catch (err) {
+      console.error("Failed to load listings", err);
+    }
+  };
+
+  useEffect(() => {
+    console.log(program, "Program initialized");
+    if (program) {
+      loadListings();
+    }
+  }, [program]);
+
+  const purchaseNFT = async (listing: any) => {
+    if (!program || !wallet.publicKey) return;
+    try {
+      await program.methods
+        .purchase()
+        .accounts({
+          buyer: wallet.publicKey,
+          listing: listing.publicKey,
+          // Add any other required accounts here
+        })
+        .rpc();
+      alert("Purchase successful!");
+      loadListings();
+    } catch (err) {
+      console.error("Purchase failed", err);
+      alert("Purchase failed: " + err);
+    }
+  };
+
   return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
-
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
-        </div>
+    <WalletConnection>
+      <main className="p-6 bg-gray-900 min-h-screen text-white grid grid-cols-1 md:grid-cols-3 gap-6">
+        {listings.length === 0 && (
+          <p className="col-span-full text-center mt-10 text-gray-400">
+            No listings found.
+          </p>
+        )}
+        {listings.map((listing, i) => {
+          const mint = listing.account.mint.toBase58();
+          const meta = nftMetadata[mint];
+          return (
+            <div
+              key={i}
+              className="bg-gray-800 p-4 rounded-xl shadow flex flex-col"
+            >
+              {meta?.offChainMetadata?.image && (
+                <img
+                  src={meta.offChainMetadata.image}
+                  alt="NFT"
+                  className="rounded-xl mb-4 object-cover h-48"
+                />
+              )}
+              <h2 className="text-lg font-bold mb-1">
+                {meta?.offChainMetadata?.name || "Unnamed NFT"}
+              </h2>
+              <p className="text-sm flex-grow">
+                {meta?.offChainMetadata?.description || "No description"}
+              </p>
+              <p className="mt-3 font-semibold">
+                Price: {listing.account.price.toString()} SOL
+              </p>
+              <button
+                onClick={() => purchaseNFT(listing)}
+                className="mt-4 px-4 py-2 bg-indigo-600 rounded hover:bg-indigo-700 transition"
+              >
+                Purchase
+              </button>
+            </div>
+          );
+        })}
       </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
+    </WalletConnection>
   );
 }

@@ -1,26 +1,27 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Connection } from "@solana/web3.js";
+import { Connection, PublicKey } from "@solana/web3.js";
 import { Program, AnchorProvider, setProvider } from "@coral-xyz/anchor";
 import { useWallet } from "@solana/wallet-adapter-react";
-import axios from "axios";
+
 import * as anchor from "@coral-xyz/anchor";
 
-import WalletConnection from "@/app/components/WalletConnect";
+import WalletConnection from "@/components/WalletConnect";
 import idl from "@/lib/idl/marketplace_task_contract.json";
-import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { getAssociatedTokenAddress, TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { MARKETPLACE_NAME, NETWORK } from "@/constants";
+import { LAMPORTS_PER_SOL } from "@solana/web3.js";
 
-const NETWORK = "https://api.devnet.solana.com";
-const HELIUS_API_KEY = process.env.NEXT_PUBLIC_HELIUS_API_KEY || "";
+import { getNFT } from "@/utils/nfts";
+import toast from "react-hot-toast";
 
 const initializeMarketplace = async (
   program: Program,
   provider: AnchorProvider
 ) => {
-  const name = "khan_marketplace";
   const marketplace = anchor.web3.PublicKey.findProgramAddressSync(
-    [Buffer.from("marketplace"), Buffer.from(name)],
+    [Buffer.from("marketplace"), Buffer.from(MARKETPLACE_NAME)],
     program.programId
   )[0];
   const rewardsMint = anchor.web3.Keypair.generate().publicKey; // Replace with actual mint if needed
@@ -33,7 +34,7 @@ const initializeMarketplace = async (
     console.log("Marketplace not initialized. Initializing...");
 
     await program.methods
-      .initialize(name, 1) // name and fee percentage
+      .initialize(MARKETPLACE_NAME, 1) // name and fee percentage
       .accounts({
         admin: provider.wallet.publicKey,
         marketplace,
@@ -51,7 +52,7 @@ export default function NftMarketPlace() {
   const wallet = useWallet();
   const [program, setProgram] = useState<Program | null>(null);
   const [listings, setListings] = useState<any[]>([]);
-  const [nftMetadata, setNftMetadata] = useState<Record<string, any>>({});
+  const [txLoading, setTxLoading] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -70,35 +71,26 @@ export default function NftMarketPlace() {
     })();
   }, [wallet]);
 
-  const fetchMetadata = async (mintAddresses: string[]) => {
-    if (!mintAddresses.length) return [];
-    try {
-      const { data } = await axios.post(
-        `https://api.helius.xyz/v0/token-metadata?api-key=${HELIUS_API_KEY}`,
-        { mintAccounts: mintAddresses }
-      );
-      return data;
-    } catch (err) {
-      console.error("Failed to fetch metadata", err);
-      return [];
-    }
-  };
-
   const loadListings = async () => {
     if (!program) return;
     try {
       const allListings = await program.account.listing.all();
-      console.log("Loaded listings:", allListings.length);
-      setListings(allListings);
+      console.log("Loaded listings:", allListings);
 
-      const mints = allListings.map((l: any) => l.account.mint.toBase58());
-      const metadata = await fetchMetadata(mints);
+      const metadata = await Promise.all(
+        allListings.map(async (listing) => {
+          const metadata = await getNFT(listing.account.mint.toBase58());
+          return {
+            metadata,
+            price: listing.account.price.toString(), // or convert if it's a BN
+            maker: listing.account.maker.toBase58(),
+          };
+        })
+      );
 
-      const metaByMint: Record<string, any> = {};
-      metadata.forEach((nft: any) => {
-        metaByMint[nft.mint] = nft;
-      });
-      setNftMetadata(metaByMint);
+      console.log(metadata);
+
+      setListings(metadata);
     } catch (err) {
       console.error("Failed to load listings", err);
     }
@@ -112,21 +104,61 @@ export default function NftMarketPlace() {
   }, [program]);
 
   const purchaseNFT = async (listing: any) => {
-    if (!program || !wallet.publicKey) return;
+    const loadingToast = toast.loading("Purchasing NFT...");
     try {
-      await program.methods
+      if (!program) return;
+
+      setTxLoading(true);
+      const marketplace = anchor.web3.PublicKey.findProgramAddressSync(
+        [Buffer.from("marketplace"), Buffer.from(MARKETPLACE_NAME)],
+        program.programId
+      )[0];
+
+      const nftMintAddress = new anchor.web3.PublicKey(listing.metadata.id);
+
+      const takerAta = await getAssociatedTokenAddress(
+        nftMintAddress,
+        wallet.publicKey!
+      );
+
+      const ownerListing = anchor.web3.PublicKey.findProgramAddressSync(
+        [marketplace.toBuffer(), nftMintAddress.toBuffer()],
+        program.programId
+      )[0];
+      const vault = anchor.utils.token.associatedAddress({
+        mint: nftMintAddress,
+        owner: ownerListing,
+      });
+
+      const treasury = anchor.web3.PublicKey.findProgramAddressSync(
+        [Buffer.from("treasury"), marketplace.toBuffer()],
+        program.programId
+      )[0];
+
+      const tx = await program.methods
         .purchase()
-        .accounts({
-          buyer: wallet.publicKey,
-          listing: listing.publicKey,
-          // Add any other required accounts here
+        .accountsPartial({
+          taker: wallet.publicKey!,
+          maker: listing.maker,
+          makerMint: listing.metadata.id,
+          marketplace,
+          takerAta,
+          vault,
+          ownerListing,
+          treasury,
+          systemProgram: anchor.web3.SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
         })
         .rpc();
-      alert("Purchase successful!");
+      console.log("\nPurchase Initialized!");
+      console.log("Your transaction signature", tx);
+      toast.success("NFT Purchased successfully!", { id: loadingToast });
       loadListings();
+      setTxLoading(false);
     } catch (err) {
+      setTxLoading(false);
       console.error("Purchase failed", err);
-      alert("Purchase failed: " + err);
+      toast.success("NFT Purchase Failed!", { id: loadingToast });
     }
   };
 
@@ -138,39 +170,29 @@ export default function NftMarketPlace() {
             No listings found.
           </p>
         )}
-        {listings.map((listing, i) => {
-          const mint = listing.account.mint.toBase58();
-          const meta = nftMetadata[mint];
-          return (
-            <div
-              key={i}
-              className="bg-gray-800 p-4 rounded-xl shadow flex flex-col"
+        {listings.map((nft, idx) => (
+          <div key={idx} className="border p-4 rounded-lg shadow-md">
+            <img
+              src={nft.metadata.content.links?.image}
+              alt={nft.metadata.content.metadata.name}
+              className="w-full h-auto"
+            />
+            <h2 className="text-lg font-semibold mt-2">
+              {nft.metadata.content.metadata.name}
+            </h2>
+            <p>{nft.metadata.content.metadata.symbol}</p>
+            <p>Price: {Number(nft.price) / LAMPORTS_PER_SOL}</p>
+            <button
+              className="bg-blue-600 text-white px-4 py-2 mt-4 rounded"
+              onClick={() => purchaseNFT(nft)}
+              style={{
+                cursor: txLoading ? "not-allowed" : "pointer",
+              }}
             >
-              {meta?.offChainMetadata?.image && (
-                <img
-                  src={meta.offChainMetadata.image}
-                  alt="NFT"
-                  className="rounded-xl mb-4 object-cover h-48"
-                />
-              )}
-              <h2 className="text-lg font-bold mb-1">
-                {meta?.offChainMetadata?.name || "Unnamed NFT"}
-              </h2>
-              <p className="text-sm flex-grow">
-                {meta?.offChainMetadata?.description || "No description"}
-              </p>
-              <p className="mt-3 font-semibold">
-                Price: {listing.account.price.toString()} SOL
-              </p>
-              <button
-                onClick={() => purchaseNFT(listing)}
-                className="mt-4 px-4 py-2 bg-indigo-600 rounded hover:bg-indigo-700 transition"
-              >
-                Purchase
-              </button>
-            </div>
-          );
-        })}
+              Purchase
+            </button>
+          </div>
+        ))}
       </main>
     </WalletConnection>
   );
